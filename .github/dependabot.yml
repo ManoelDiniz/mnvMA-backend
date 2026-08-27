@@ -1,0 +1,34 @@
+version: 2
+
+# Semanal, e não diário: PR de dependência que chega todo dia vira ruído que
+# ninguém lê — e uma atualização de segurança some no meio.
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      # Um PR por grupo em vez de um por pacote. Atualização de tipo e de
+      # ferramenta de teste anda junto de qualquer jeito.
+      desenvolvimento:
+        dependency-type: development
+      producao-menor:
+        dependency-type: production
+        update-types: [minor, patch]
+    # Major de framework é decisão, não manutenção: entra na mão, quando alguém
+    # tiver tempo de ler o guia de migração.
+    ignore:
+      - dependency-name: '@nestjs/*'
+        update-types: [version-update:semver-major]
+      - dependency-name: typeorm
+        update-types: [version-update:semver-major]
+      - dependency-name: typescript
+        update-types: [version-update:semver-major]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday

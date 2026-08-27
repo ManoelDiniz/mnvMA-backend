@@ -1,0 +1,160 @@
+name: CI
+
+# Todo PR e todo push na main. O objetivo não é rodar tudo o que existe: é
+# rodar, antes do merge, o que ninguém lembra de rodar na mão.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Um push novo no mesmo PR cancela a execução anterior — ninguém precisa do
+# resultado de um commit que já foi substituído.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Qualidade: não precisa de banco, então roda em paralelo e falha rápido ──
+  qualidade:
+    name: Lint, tipos, unitários e build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # `npm run lint` local usa `--fix`, que consertaria o problema e passaria
+      # sem nunca contar. Aqui é o mesmo ESLint, só que sem conserto.
+      - name: ESLint
+        run: npm run lint:ci
+
+      - name: TypeScript
+        run: npx tsc --noEmit
+
+      - name: Testes unitários
+        run: npm test -- --ci
+
+      - name: Build
+        run: npm run build
+
+  # ── Isolamento entre tenants: a razão de este arquivo existir ───────────────
+  #
+  # É o primeiro risco da tabela do roadmap, e o único cujo estrago não tem
+  # volta: um tenant lendo dado do outro é o fim do produto. A suíte existia e
+  # passava desde o Sprint 1 — o que faltava era alguém ser obrigado a rodá-la.
+  isolamento:
+    name: e2e — isolamento de tenant e migrations
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        # A mesma versão do docker-compose. Banco de CI diferente do de
+        # desenvolvimento esconde justamente o erro que só aparece num deles.
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: masterkey
+          MYSQL_DATABASE: cuidador_test
+        ports:
+          - 3306:3306
+        # `root`, e não um usuário comum, porque as migrations criam TRIGGERs —
+        # que substituem o Row Level Security que o MySQL não tem. Com binlog
+        # ligado, criar trigger exige SUPER.
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -pmasterkey"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+          --character-set-server=utf8mb4
+          --collation-server=utf8mb4_0900_ai_ci
+          --default-time-zone=+00:00
+
+    env:
+      NODE_ENV: test
+      DATABASE_URL: mysql://root:masterkey@127.0.0.1:3306/cuidador_test
+      # Segredos de teste, descartáveis e sem valor fora deste job. A validação
+      # de ambiente recusa os do `.env.example` só em produção.
+      JWT_ACCESS_SECRET: ci-access-${{ github.run_id }}-nao-vale-nada-fora-daqui
+      JWT_REFRESH_SECRET: ci-refresh-${{ github.run_id }}-nao-vale-nada-fora-daqui
+      APP_URL: http://localhost:5173
+      API_URL: http://localhost:3000
+      MAIL_PROVIDER: log
+      STORAGE_DRIVER: local
+      STORAGE_LOCAL_DIR: ./uploads
+      # Cron rodando no meio do e2e disputaria a trava de `job_runs` com o
+      # próprio teste.
+      JOBS_ENABLED: 'false'
+      # O Pino loga cada request em JSON. Num terminal isso é útil; num log de
+      # CI, são milhares de linhas entre você e a falha que precisa ler.
+      LOG_LEVEL: error
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Migration que não roda em banco limpo é migration que quebra no deploy.
+      - name: Migrations em banco limpo
+        run: npm run migration:run
+
+      # O cadastro cria uma assinatura em trial apontando para um plano; sem o
+      # catálogo, todo `POST /auth/register` do e2e falharia por outro motivo.
+      - name: Seed do catálogo de planos
+        run: npm run seed
+
+      # Item 3 da Definition of Done: "migration gerada e revertível
+      # (migration:revert testado)". Até aqui, nada obrigava ninguém a testar —
+      # e `down()` é o método que só é exercitado no pior dia possível, com o
+      # deploy quebrado e alguém tentando voltar.
+      #
+      # O ciclo completo prova as duas metades: o `down` desfaz sem erro, e o
+      # `up` reaplica em cima do que sobrou.
+      - name: Última migration vai e volta
+        run: |
+          npm run migration:revert
+          npm run migration:run
+
+      # Nota sobre o que este job NÃO faz: conferir drift entre entities e
+      # banco com `migration:generate`. O schema deste projeto é escrito à mão,
+      # com nomes próprios de constraint (`fk_users_tenant`) e colunas geradas
+      # que as entities não declaram. O gerador do TypeORM não sabe disso e
+      # propõe dropar todas as foreign keys para recriá-las com nomes de hash —
+      # 376 linhas de diferença num banco que está correto. Seria um passo
+      # vermelho em todo PR, e perigoso se alguém resolvesse "consertar"
+      # aplicando o que ele gerou.
+
+      - name: Suíte e2e completa
+        run: npm run test:e2e
+
+  # ── Dependências: informa, não bloqueia (exceto o que é grave de verdade) ───
+  #
+  # Uma vulnerabilidade `high` numa dependência transitiva de ferramenta de
+  # build não justifica travar o merge de todo mundo. O trabalho contínuo é do
+  # Dependabot; este job existe para o número aparecer no PR.
+  dependencias:
+    name: npm audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Vulnerabilidades conhecidas (relatório)
+        run: npm audit --audit-level=high || true
+
+      - name: Vulnerabilidade crítica bloqueia
+        run: npm audit --audit-level=critical
