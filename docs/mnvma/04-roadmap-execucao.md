@@ -336,13 +336,53 @@ teste que existe, passa, e que ninguém é obrigado a rodar.
       método exercitado só no pior dia possível
 - [x] `npm audit` e Dependabot semanal nos dois repositórios, com major de
       framework ignorado (é decisão, não manutenção)
-- [ ] **Branch protegida exigindo o CI verde** ← é configuração no GitHub,
-      não arquivo no repositório. Sem isto o pipeline informa, mas não impede:
+- [ ] **Branch protegida exigindo o CI verde** ← é configuração no GitHub, não
+      arquivo no repositório: nada aqui dentro consegue ligá-la. Sem isto o
+      pipeline informa e o merge passa igual.
+
+      O comando abaixo exige os checks e **não** exige aprovação em PR — num
+      projeto de uma pessoa só, exigir review trancaria o dono para fora do
+      próprio repositório, porque ninguém pode aprovar o próprio PR.
+      `enforce_admins: false` é a saída de emergência: o titular ainda
+      consegue empurrar direto no dia em que precisar.
 
       ```bash
       gh api -X PUT repos/ManoelDiniz/mnvMA-backend/branches/main/protection \
-        --input protecao.json
+        --input - <<'JSON'
+      {
+        "required_status_checks": {
+          "strict": true,
+          "contexts": [
+            "Lint, tipos, unitários e build",
+            "e2e — isolamento de tenant e migrations"
+          ]
+        },
+        "enforce_admins": false,
+        "required_pull_request_reviews": null,
+        "restrictions": null
+      }
+      JSON
+
+      gh api -X PUT repos/ManoelDiniz/mnvMA-Frontend/branches/main/protection \
+        --input - <<'JSON'
+      {
+        "required_status_checks": {
+          "strict": true,
+          "contexts": ["Lint, tipos, testes e build"]
+        },
+        "enforce_admins": false,
+        "required_pull_request_reviews": null,
+        "restrictions": null
+      }
+      JSON
       ```
+
+      O `npm audit` ficou fora dos checks obrigatórios de propósito: ele
+      informa, e uma vulnerabilidade em dependência de build não deve travar
+      correção de bug em produção.
+
+      A partir daí o fluxo passa a ser branch → PR → CI verde → merge. É o
+      preço de o vermelho significar alguma coisa.
 
 **Verificado localmente antes de subir**, contra um MySQL descartável: as 10
 migrations aplicam em banco vazio, o catálogo popula, a última migration volta e
