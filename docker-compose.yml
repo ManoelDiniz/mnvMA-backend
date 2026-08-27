@@ -1,0 +1,38 @@
+# Opcional: só use se preferir MySQL em container em vez do MySQL local.
+# O MNVMA aponta para o que estiver na DATABASE_URL, tanto faz qual dos dois.
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: mnvma-mysql
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --default-time-zone=+00:00
+    environment:
+      MYSQL_ROOT_PASSWORD: masterkey
+      MYSQL_DATABASE: cuidador
+      MYSQL_USER: sa
+      MYSQL_PASSWORD: masterkey
+    ports:
+      - '3306:3306'
+    volumes:
+      - mnvma_mysqldata:/var/lib/mysql
+    healthcheck:
+      test: ['CMD', 'mysqladmin', 'ping', '-h', 'localhost', '-pmasterkey']
+      interval: 5s
+      timeout: 5s
+      retries: 15
+
+  redis:
+    image: redis:7-alpine
+    container_name: mnvma-redis
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    volumes:
+      - mnvma_redisdata:/data
+
+volumes:
+  mnvma_mysqldata:
+  mnvma_redisdata:

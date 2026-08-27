@@ -1,0 +1,10 @@
+# Normaliza a quebra de linha no repositório: LF sempre.
+#
+# Sem isto, o Windows commita CRLF e o CI (Linux) vê o arquivo inteiro como
+# alterado — um diff de 200 arquivos onde ninguém mexeu em nada.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.ico binary
+*.webp binary
