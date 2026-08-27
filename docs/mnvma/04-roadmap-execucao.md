@@ -95,7 +95,9 @@ não existir, uma empresa não consegue usar nada disso.
 - [x] Grade de escala por semana, com repetição da semana inteira
 - [x] Ocorrências: registro, encerramento com resolução e reabertura
 - [ ] Arrastar plantão de um cuidador para outro dentro da grade
-- [ ] Substituição de cuidador na tela do plantão
+- [x] Substituição de cuidador na tela do plantão: candidatos com o motivo de
+      quem não pode, escalar à força com a marca ficando no motivo, e o
+      histórico de trocas do plantão
 - [ ] Dashboard empresarial
 - [ ] **Passar as telas novas num navegador de verdade** ← rodaram tsc, lint,
       smoke de renderização e o contrato com a API; ninguém clicou ainda
@@ -148,7 +150,6 @@ credenciais de produção.
 | Arquivo do documento não é guardado | A validade é controlada, mas o PDF do COREN não sobe: falta bucket (R2/S3) e URL assinada | Sprint 6 |
 | Módulo `tenants` só tem entity | Sem tela nem rota para a conta editar os próprios dados | Sprint 8 |
 | Impersonação | O suporte não consegue ver o que o cliente vê | Sprint 8 — desenho próprio |
-| Substituição de cuidador sem tela | O backend guarda o histórico; a operação não consegue registrar | Sprint 6 |
 | Dashboard empresarial | A empresa não tem o panorama que o individual tem | Sprint 6 |
 | Rentabilidade por contrato | Falta o recorte no relatório | Sprint 6 |
 | Suíte de isolamento fora do CI | O teste existe e passa, mas nada bloqueia o merge | Sprint 0 |
