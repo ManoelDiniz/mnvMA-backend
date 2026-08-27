@@ -1,3 +1,4 @@
+import { isAbsolute } from 'node:path'
 import { z } from 'zod'
 
 /**
@@ -52,6 +53,31 @@ export const envSchema = z.object({
   MAIL_REPLY_TO: z.string().optional(),
   RESEND_API_KEY: z.string().optional(),
 
+  // ─── Arquivos ──────────────────────────────────────────────────────────────
+  // `local` guarda em disco. É o padrão em desenvolvimento — permite anexar o
+  // PDF do COREN sem conta em provedor de nuvem — e **também é o modo de
+  // produção por enquanto**: o arquivo mora num volume montado no servidor, e o
+  // `s3` fica pronto para o dia em que o volume apertar.
+  //
+  // O que muda entre os dois é só onde o byte cai: a chave é montada pelo
+  // servidor nos dois casos, e o download é por URL assinada nos dois casos.
+  STORAGE_DRIVER: z.enum(['local', 's3']).default('local'),
+  /**
+   * Onde o disco guarda. Em produção precisa ser **caminho absoluto de um
+   * volume persistente** — ver a validação abaixo.
+   */
+  STORAGE_LOCAL_DIR: z.string().default('./uploads'),
+  /** Validade do link de download. Curto: o link circula por e-mail e WhatsApp. */
+  STORAGE_URL_TTL: z.coerce.number().int().min(60).max(86_400).default(300),
+
+  S3_ENDPOINT: z.string().optional(),
+  S3_REGION: z.string().default('auto'),
+  S3_BUCKET: z.string().optional(),
+  S3_ACCESS_KEY_ID: z.string().optional(),
+  S3_SECRET_ACCESS_KEY: z.string().optional(),
+  /** R2 e MinIO usam caminho (`bucket/objeto`); a AWS usa subdomínio. */
+  S3_FORCE_PATH_STYLE: bool(true),
+
   /** Dias de antecedência do aviso de documento vencendo. */
   DOCUMENT_ALERT_DAYS: z.coerce.number().int().min(1).max(180).default(30),
   /** Liga os jobs agendados. Desligue nos processos que não são o worker. */
@@ -96,6 +122,42 @@ export function validateEnv(raw: Record<string, unknown>): Env {
     throw new Error(
       'MP_ACCESS_TOKEN configurado sem MP_WEBHOOK_SECRET: o webhook do Mercado Pago ficaria sem ' +
         'validação de assinatura, o que permitiria a qualquer um ativar uma assinatura.',
+    )
+  }
+
+  // Escolher `s3` sem credencial faria todo upload falhar com um erro do
+  // provedor que ninguém entende — melhor não subir.
+  if (parsed.data.STORAGE_DRIVER === 's3') {
+    const faltando = (
+      [
+        ['S3_BUCKET', parsed.data.S3_BUCKET],
+        ['S3_ACCESS_KEY_ID', parsed.data.S3_ACCESS_KEY_ID],
+        ['S3_SECRET_ACCESS_KEY', parsed.data.S3_SECRET_ACCESS_KEY],
+      ] as const
+    )
+      .filter(([, valor]) => !valor)
+      .map(([nome]) => nome)
+
+    if (faltando.length > 0) {
+      throw new Error(`STORAGE_DRIVER=s3 exige ${faltando.join(', ')}.`)
+    }
+  }
+
+  // Guardar no próprio servidor é uma escolha válida — mas só se o diretório
+  // for um volume que sobreviva ao deploy. `./uploads` é relativo ao diretório
+  // da aplicação, que é exatamente o que a próxima publicação substitui: o
+  // documento subiria, o link funcionaria, e o arquivo sumiria sem ninguém ver.
+  // Exigir caminho absoluto não prova que há volume montado, mas obriga a
+  // decisão a ser escrita em algum lugar em vez de herdada do padrão.
+  if (
+    parsed.data.STORAGE_DRIVER === 'local' &&
+    (parsed.data.NODE_ENV === 'production' || parsed.data.NODE_ENV === 'staging') &&
+    !isAbsolute(parsed.data.STORAGE_LOCAL_DIR)
+  ) {
+    throw new Error(
+      `STORAGE_DRIVER=local fora de desenvolvimento exige STORAGE_LOCAL_DIR com caminho ` +
+        `absoluto de um volume persistente (recebido: "${parsed.data.STORAGE_LOCAL_DIR}"). ` +
+        `Caminho relativo mora dentro da aplicação e some no próximo deploy.`,
     )
   }
 

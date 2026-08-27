@@ -17,6 +17,12 @@ RUN addgroup -S app && adduser -S app -G app
 COPY --from=deps  /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./
+# Ponto de montagem dos documentos. Precisa existir e pertencer ao usuario `app`
+# ANTES do volume ser montado: se o provedor montar sobre um diretorio do root,
+# o primeiro upload falha com EACCES — e falha no upload de um cliente, nao no
+# deploy. `STORAGE_LOCAL_DIR=/data/uploads` aponta para ca.
+RUN mkdir -p /data/uploads && chown -R app:app /data
+VOLUME ["/data"]
 USER app
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \
