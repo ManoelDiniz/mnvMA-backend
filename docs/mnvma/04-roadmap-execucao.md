@@ -78,6 +78,9 @@ não existir, uma empresa não consegue usar nada disso.
 
 - [x] Cuidadores: CRUD completo (antecipado — sem ele a empresa não montava plantão)
 - [x] Documentos do cuidador com controle de validade e alerta do que vence
+- [x] Arquivo do documento anexado de verdade: `POST /documents/:id/file`,
+      download por URL assinada, tipo conferido pelos bytes e chave montada pelo
+      servidor — **guardado no volume do próprio servidor** (ver §4.2)
 - [x] Escalas em grade (`GET /schedules`) e repetição de semana (`POST /schedules/copy-week`)
 - [x] Plantão empresarial com custo, cobrança e margem separados
 - [x] Contratos com geração de cobrança e três camadas de idempotência
@@ -92,6 +95,9 @@ não existir, uma empresa não consegue usar nada disso.
 - [x] Página pública de aceite do convite (`/convite/:token`)
 - [x] Contratos, com a prévia da rodada de cobrança antes de disparar
 - [x] Documentos do cuidador, abrindo no que está vencendo ou vencido
+- [x] Anexar, trocar, baixar e remover o arquivo na linha do documento — com o
+      formato e o tamanho recusados **antes** da subida, e o link de download
+      pedido no clique, porque o da lista já expirou (ver §4.2)
 - [x] Grade de escala por semana, com repetição da semana inteira
 - [x] Ocorrências: registro, encerramento com resolução e reabertura
 - [ ] Arrastar plantão de um cuidador para outro dentro da grade
@@ -147,12 +153,45 @@ credenciais de produção.
 
 | Lacuna | Por que importa | Onde |
 |---|---|---|
-| Arquivo do documento não é guardado | A validade é controlada, mas o PDF do COREN não sobe: falta bucket (R2/S3) e URL assinada | Sprint 6 |
 | Módulo `tenants` só tem entity | Sem tela nem rota para a conta editar os próprios dados | Sprint 8 |
 | Impersonação | O suporte não consegue ver o que o cliente vê | Sprint 8 — desenho próprio |
 | Dashboard empresarial | A empresa não tem o panorama que o individual tem | Sprint 6 |
 | Rentabilidade por contrato | Falta o recorte no relatório | Sprint 6 |
-| Suíte de isolamento fora do CI | O teste existe e passa, mas nada bloqueia o merge | Sprint 0 |
+| Suíte de isolamento fora do CI | O teste existe e passa, mas nada bloqueia o merge | §6.1 |
+
+Esta tabela lista o que falta **no produto**. O que falta em volta dele — CI,
+observabilidade, LGPD, backup e as obrigações de cobrar no Brasil — está no
+[§6.1](#61-sprint-85--governança-o-que-falta-para-abrir-a-porta), e é o que
+impede de abrir a porta.
+
+---
+
+## 4.2 Onde os arquivos ficam
+
+**Decisão: o disco do próprio servidor, por enquanto.** `STORAGE_DRIVER=local`
+em produção. O plano original previa bucket S3/R2 desde o primeiro dia; o driver
+`s3` está escrito, testado e continua no repositório — mas abrir conta em
+provedor de nuvem para guardar alguns PDFs de COREN, antes de existir o primeiro
+assinante pagante, é custo e superfície de configuração comprados cedo demais.
+
+Trocar depois é uma variável de ambiente: nenhum módulo menciona driver. Quem
+grava chama `StorageService`, e o que muda é só onde o byte cai.
+
+O que **não** muda com essa escolha, e é o motivo de ela ser segura:
+
+- a chave é montada pelo servidor e sempre começa pelo tenant;
+- o tipo é conferido pelos bytes, não pelo cabeçalho do navegador;
+- o download é por **URL assinada com HMAC** e validade de 5 minutos, servida
+  por rota própria, sempre como `attachment` e com `nosniff` — não há diretório
+  estático exposto.
+
+O que passa a ser responsabilidade da operação, e não do código:
+
+| Obrigação | Por quê |
+|---|---|
+| `STORAGE_LOCAL_DIR` absoluto, num **volume persistente** | Caminho relativo mora dentro da aplicação e some no deploy seguinte. A API se recusa a subir assim fora de desenvolvimento, e o `Dockerfile` já cria `/data/uploads` com o dono certo |
+| **Backup do diretório junto com o dump do MySQL** | O banco guarda a chave, não o arquivo. Dump restaurado sozinho devolve links que apontam para o nada |
+| Olho no espaço em disco | Um bucket cresce sozinho; um volume enche. É o gatilho para virar a chave do `s3` |
 
 ---
 
@@ -268,6 +307,135 @@ A base já está pronta: `admin_actions` existe para receber esse rastro.
 
 ---
 
+## 6.1 Sprint 8.5 — Governança: o que falta para abrir a porta
+
+Levantado numa auditoria do código contra estes documentos. O que está aqui não
+é funcionalidade que ficou para depois: é o conjunto de coisas que **os
+documentos tratam como pressuposto** e que nenhum sprint jamais recebeu como
+tarefa. Cada uma delas aparece citada em algum lugar como se já existisse.
+
+Nada disto aparece para o cliente. Todas aparecem no dia em que der errado.
+
+### Verificação automática — nada bloqueia um merge hoje
+
+Não existe `.github/` em nenhum dos dois repositórios. Ao mesmo tempo, três
+documentos falam do pipeline como se ele estivesse de pé: a suíte de isolamento
+"bloqueando merge" (§2), o Lighthouse "travado no CI" (§7), o
+`lint → test → build → migration → deploy` de [`01-backend.md`](./01-backend.md).
+O primeiro risco da tabela do §9 — vazamento entre tenants — é mitigado por um
+teste que existe, passa, e que ninguém é obrigado a rodar.
+
+- [x] `mnvma-api`: lint (sem `--fix`), `tsc`, unitários, build — e um job com
+      MySQL 8.4 que roda migrations em banco limpo, popula os planos e executa
+      **as 7 suítes e2e**, isolamento de tenant incluído
+- [x] `mnvma-care`: lint, `tsc`, vitest e build de produção (que é onde o
+      service worker é gerado — PWA que não compila não atualiza em aparelho
+      nenhum)
+- [x] `migration:revert` seguido de `migration:run` a cada PR — o item 3 da
+      Definition of Done, que ninguém era obrigado a cumprir. `down()` é o
+      método exercitado só no pior dia possível
+- [x] `npm audit` e Dependabot semanal nos dois repositórios, com major de
+      framework ignorado (é decisão, não manutenção)
+- [ ] **Branch protegida exigindo o CI verde** ← é configuração no GitHub,
+      não arquivo no repositório. Sem isto o pipeline informa, mas não impede:
+
+      ```bash
+      gh api -X PUT repos/ManoelDiniz/mnvMA-backend/branches/main/protection \
+        --input protecao.json
+      ```
+
+**Verificado localmente antes de subir**, contra um MySQL descartável: as 10
+migrations aplicam em banco vazio, o catálogo popula, a última migration volta e
+reaplica, e as **87 asserções e2e passam**. O que não dá para verificar daqui é
+o runner do GitHub — a versão do MySQL lá é 8.4, a daqui é 8.0.
+
+### Por que não há checagem de drift de schema
+
+A ideia óbvia — `migration:generate` num banco recém-migrado, falhar se ele
+gerar alguma coisa — foi testada e **descartada**. O schema deste projeto é
+escrito à mão, com nomes próprios de constraint (`fk_users_tenant`) e colunas
+geradas que as entities não declaram (`deleted_marker`, que substitui o índice
+parcial que o MySQL não tem). O gerador do TypeORM não sabe nada disso: ele
+propõe dropar **todas** as foreign keys para recriá-las com nomes de hash, 376
+linhas de diferença num banco que está inteiramente correto.
+
+Seria um passo vermelho em todo PR — e o risco real não é o incômodo, é alguém
+resolver "consertar o CI" aplicando o que ele gerou.
+
+### Observabilidade — `SENTRY_DSN` existe e não é lido por ninguém
+
+A variável está declarada em `config/env.ts` desde o começo. O pacote nunca foi
+instalado. Hoje, um erro em produção aparece no log de quem for procurar — e a
+régua de dunning, o webhook do Mercado Pago e os jobs noturnos rodam sem
+ninguém olhando, que era justamente o ponto do Sprint 6.5.
+
+- [ ] Sentry no backend, com `request-id` e tenant no escopo (nunca dado pessoal)
+- [ ] Sentry no frontend, com o release amarrado ao build
+- [ ] Alerta de webhook com erro e de evento órfão — pendência aberta no §11 de
+      [`03-mercado-pago.md`](./03-mercado-pago.md)
+- [ ] Alerta de job que não rodou: `job_runs` sabe quando foi a última vez
+- [ ] Um canal que apite de verdade (e-mail serve) — painel que ninguém abre não
+      é alerta
+
+### LGPD — especificada em detalhe e órfã
+
+[`01-backend.md` §10](./01-backend.md) define quatro obrigações concretas.
+Nenhuma delas foi para sprint nenhum, e nenhuma existe no código: não há
+`AuditLog`, não há exportação, não há anonimização. **O sistema guarda dado de
+saúde de idoso.** Isto não é dívida técnica; é condição de operar.
+
+- [ ] `AuditLog` de leitura em entidade sensível
+- [ ] `GET /v1/tenants/me/export` — exportação completa em JSON/CSV
+- [ ] `DELETE /v1/tenants/me` — anonimização em 30 dias, com retenção fiscal
+- [ ] Retenção de log de 12 meses, aplicada por job
+- [ ] Consentimento registrado no cadastro, com data e versão do texto aceito
+- [ ] Encarregado (DPO) nomeado e canal do titular publicado
+
+Depende do módulo `tenants`, que hoje só tem entity — o mesmo módulo que a nota
+fiscal vai precisar. Fazer os dois juntos.
+
+### Backup — só existe como linha na tabela de riscos
+
+O §9 diz "restore testado em staging uma vez por mês". Não há tarefa, não há
+runbook, não há quem. E desde o §4.2 o backup deixou de ser só o banco.
+
+- [ ] Backup diário do MySQL, com retenção definida
+- [ ] Backup do diretório de uploads **na mesma janela** do dump — restaurar um
+      sem o outro devolve links apontando para o nada
+- [ ] Restore testado em staging, com a data do último teste anotada
+- [ ] Runbook de restauração escrito antes de precisar dele
+
+### Obrigações de cobrar dinheiro no Brasil
+
+Duas delas já estão no checklist de go-live de
+[`03-mercado-pago.md` §11](./03-mercado-pago.md), escondidas dentro do documento
+do provedor. São bloqueio jurídico, não item de backlog — e o Sprint 7 está a
+uma variável de ambiente de começar a cobrar.
+
+- [ ] Termos de uso e política de privacidade publicados e linkados no checkout
+- [ ] Processo de nota fiscal definido (emissão manual no começo é aceitável)
+- [ ] Dados fiscais do assinante no cadastro — depende do módulo `tenants`
+- [ ] Política de reembolso e o **direito de arrependimento de 7 dias** (CDC),
+      que tem efeito direto no `billing`: cancelamento na primeira semana
+- [ ] Contrato de assinatura com a regra de reajuste
+
+### Como o cliente chega
+
+O roadmap leva o produto até "recebo dinheiro de verdade" e nunca diz como
+alguém encontra o `/criar-conta`. Não é escopo de engenharia, mas sem isso os
+outros quinze sprints não são cobrados de ninguém.
+
+- [ ] Site público com preços — hoje só existe o app
+- [ ] Página `/instalar` com instruções por plataforma (prevista no Sprint 9)
+- [ ] Canal de suporte com endereço publicado
+- [ ] Um aparelho Android e um iPhone para o QA que três sprints já pedem
+
+**Pronto quando:** um merge quebrado não passa, um erro em produção chega a
+alguém, um titular consegue pedir os próprios dados, e um restore já foi feito
+uma vez — antes de precisar.
+
+---
+
 ## 7. Sprint 9 — PWA completo (semana 16+)
 
 - [ ] Cache offline da agenda dos próximos 7 dias e dos clientes
@@ -296,14 +464,14 @@ A base já está pronta: `admin_actions` existe para receber esse rastro.
 
 | Risco | Impacto | Mitigação |
 |---|---|---|
-| Vazamento entre tenants | Fim do produto | Repositório escopado + triggers de escrita no MySQL + suíte de teste bloqueando merge |
+| Vazamento entre tenants | Fim do produto | Repositório escopado + triggers de escrita no MySQL + suíte e2e rodando a cada PR (§6.1) — falta proteger a branch para o vermelho realmente impedir o merge |
 | Construir empresarial antes de validar individual | Meses jogados fora | Individual em produção com usuários reais antes do sprint 6 |
 | Cobrança quebrada em silêncio | Receita evaporando sem ninguém ver | Webhook validado + job de reconciliação horária + alerta no Sentry |
 | Fuso e plantão que vira o dia | Relatório e pagamento errados | `datetime(6)` em UTC + conexão `timezone: 'Z'`, conversão só na borda, testes com 19h→07h |
 | Dinheiro em `float` | Divergência de centavos no financeiro | `decimal(12,2)` lido como string e soma em SQL |
 | PWA travado em versão antiga | Usuário nunca recebe correção | `sw.js` com `no-cache` no CDN + prompt de atualização |
 | Escopo infinito (marketplace, WhatsApp, app nativo) | Nada fica pronto | Fases 5+ ficam congeladas até o MRR existir |
-| Backup que nunca foi restaurado | Perda de dados sem volta | Restore testado em staging uma vez por mês |
+| Backup que nunca foi restaurado | Perda de dados sem volta | Restore testado em staging uma vez por mês — **dump do MySQL e o diretório de uploads juntos**, já que os documentos moram no volume do servidor (§4.2) |
 
 ---
 
@@ -313,7 +481,7 @@ A base já está pronta: `admin_actions` existe para receber esse rastro.
 |---|---|
 | Railway (API + MySQL + Redis) | US$ 10–25 |
 | Vercel (frontend) | US$ 0 (Hobby) → US$ 20 (Pro) |
-| Cloudflare R2 (documentos) | US$ 0–5 |
+| Documentos | US$ 0 — volume do servidor (R2 entra quando o volume apertar) |
 | E-mail transacional (Resend/SES) | US$ 0–20 |
 | Domínio `.com.br` | ~R$ 40/ano |
 | Sentry | US$ 0 (free) |

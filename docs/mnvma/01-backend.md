@@ -35,7 +35,7 @@ com estado (precisa escalar horizontalmente).
 | Cache / filas | Redis + BullMQ |
 | Auth | JWT (access 15min + refresh 30d) + Argon2id |
 | Validação | `class-validator` + `class-transformer` (mesmo estilo decorator das entities) |
-| Arquivos | S3 compatível (Cloudflare R2 / Backblaze B2) |
+| Arquivos | Volume no servidor (`STORAGE_DRIVER=local`); S3/R2 é troca de variável |
 | Docs | Swagger em `/docs` |
 | Logs | Pino + request-id |
 
@@ -937,8 +937,12 @@ depende do envio.
 - Helmet, `trust proxy` correto atrás do load balancer.
 - Usuário do banco com o mínimo necessário: sem `SUPER`, sem `FILE`, sem
   `PROCESS`. O módulo `admin` (Super Admin) usa credencial própria.
-- Uploads: URL assinada com expiração de 5 min, `Content-Type` e tamanho
-  validados, bucket **privado**, download também por URL assinada.
+- Uploads: URL assinada com expiração de 5 min, `Content-Type` conferido **pelos
+  bytes** e tamanho validado, chave montada pelo servidor sempre começando pelo
+  tenant, download também por URL assinada e sempre como `attachment`.
+  Guardando no próprio servidor (`STORAGE_DRIVER=local`), o diretório fica
+  **fora da raiz servida** e nenhuma rota estática o expõe: o único caminho até
+  o byte é o link assinado. Com `s3`, o bucket é **privado**.
 - LGPD (o sistema guarda dado de saúde indireto):
   - `AuditLog` de leitura em entidades sensíveis
   - `GET /v1/tenants/me/export` — exportação completa em JSON/CSV
@@ -977,10 +981,17 @@ MP_WEBHOOK_SECRET=
 MP_BACK_URL=https://app.mnvma.com.br/billing/retorno
 MP_NOTIFICATION_URL=https://api.mnvma.com.br/v1/webhooks/mercadopago
 
+# Arquivos — hoje no volume do próprio servidor. Caminho ABSOLUTO fora de
+# desenvolvimento, senão a API não sobe; e o backup tem que cobrir este diretório.
+STORAGE_DRIVER=local
+STORAGE_LOCAL_DIR=/data/uploads
+STORAGE_URL_TTL=300
+# Trocar para `s3` no dia em que o volume apertar — nenhum módulo muda.
 S3_ENDPOINT=
+S3_REGION=auto
 S3_BUCKET=mnvma-documents
-S3_ACCESS_KEY=
-S3_SECRET_KEY=
+S3_ACCESS_KEY_ID=
+S3_SECRET_ACCESS_KEY=
 
 SMTP_URL=
 MAIL_FROM="MNVMA <nao-responda@mnvma.com.br>"

@@ -94,7 +94,7 @@ negócio de dinheiro. O backend nunca serve HTML.
 | Cache / filas | Redis + BullMQ | Jobs de cobrança recorrente, notificações, retry de webhook |
 | Auth | JWT (access 15min + refresh 30d) + Argon2 | Refresh rotativo em cookie httpOnly |
 | Validação | Zod ou class-validator | Contrato de entrada explícito |
-| Arquivos | S3 compatível (Cloudflare R2 / Backblaze B2) | Documentos de cuidadores e clientes |
+| Arquivos | Volume no servidor (driver `local`), com S3/R2 pronto para trocar | Documentos de cuidadores e clientes |
 | Docs | Swagger (`/docs`) | Contrato para o frontend |
 | Logs | Pino + request-id | Auditoria e rastreio de webhook |
 
@@ -145,7 +145,7 @@ separada — é um terceiro projeto, opcional e independente.
         └───┬──────────┬────────────┬───┘
             │          │            │
             ▼          ▼            ▼
-        MySQL 8     Redis      S3 / R2
+        MySQL 8     Redis    volume do servidor
                                  (documentos)
             ▲
             │ webhooks assinados (x-signature)
