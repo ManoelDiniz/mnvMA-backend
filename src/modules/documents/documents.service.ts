@@ -4,6 +4,7 @@ import {
   TenantScopedRepository,
 } from '../../common/database/tenant-scoped.repository'
 import { PageDto } from '../../common/dto/pagination.dto'
+import { StorageService, type ArquivoRecebido } from '../../common/storage/storage.service'
 import { dataLocal, diasEntre, somarDias } from '../../common/utils/calendar'
 import { Caregiver } from '../caregivers/entities/caregiver.entity'
 import {
@@ -42,7 +43,75 @@ export class DocumentsService {
     private readonly documents: TenantScopedRepository<CaregiverDocument>,
     @InjectTenantRepository(Caregiver)
     private readonly caregivers: TenantScopedRepository<Caregiver>,
+    private readonly storage: StorageService,
   ) {}
+
+  // ─── Arquivo ────────────────────────────────────────────────────────────────
+
+  /**
+   * Anexa (ou troca) o arquivo do documento.
+   *
+   * Trocar remove o anterior do armazenamento: guardar as duas versões seria
+   * acumular documento pessoal de gente sem que ninguém consiga chegar nele
+   * pela tela — o pior dos dois mundos, custo e risco sem utilidade.
+   */
+  async anexarArquivo(id: string, arquivo: ArquivoRecebido): Promise<DocumentResponseDto> {
+    const doc = await this.documents.findByIdOrFail(id, {}, 'Documento não encontrado.')
+    const anterior = doc.fileKey
+
+    const guardado = await this.storage.guardar(
+      this.documents.tenantId,
+      `caregivers/${doc.caregiverId}/documents/${doc.id}`,
+      arquivo,
+    )
+
+    await this.documents.updateById(id, {
+      fileKey: guardado.key,
+      fileName: guardado.fileName,
+      mimeType: guardado.mimeType,
+      fileSize: guardado.size,
+      fileUploadedAt: new Date(),
+    })
+
+    // Só depois de a nova chave estar gravada: se a remoção viesse antes e a
+    // gravação falhasse, o documento ficaria sem arquivo nenhum.
+    if (anterior && anterior !== guardado.key) await this.storage.remover(anterior)
+
+    return this.findOne(id)
+  }
+
+  async removerArquivo(id: string): Promise<DocumentResponseDto> {
+    const doc = await this.documents.findByIdOrFail(id, {}, 'Documento não encontrado.')
+
+    if (doc.fileKey) {
+      await this.documents.updateById(id, {
+        fileKey: null,
+        fileName: null,
+        mimeType: null,
+        fileSize: null,
+        fileUploadedAt: null,
+      })
+      await this.storage.remover(doc.fileKey)
+    }
+
+    return this.findOne(id)
+  }
+
+  /**
+   * Preenche o link de download de cada documento que tem arquivo.
+   *
+   * Assinar é conta local nos dois drivers — HMAC no disco, SigV4 no bucket —,
+   * então uma lista de 200 documentos não vira 200 idas à rede.
+   */
+  private async comLinks(dtos: DocumentResponseDto[]): Promise<DocumentResponseDto[]> {
+    return Promise.all(
+      dtos.map(async (dto) =>
+        dto.fileKey
+          ? { ...dto, fileUrl: await this.storage.urlAssinada(dto.fileKey, dto.fileName ?? undefined) }
+          : dto,
+      ),
+    )
+  }
 
   async list(query: DocumentQueryDto): Promise<PageDto<DocumentResponseDto>> {
     const hoje = dataLocal()
@@ -110,7 +179,7 @@ export class DocumentsService {
       .take(200)
       .getMany()
 
-    return docs.map((d) => paraResposta(d, hoje))
+    return this.comLinks(docs.map((d) => paraResposta(d, hoje)))
   }
 
   async findOne(id: string): Promise<DocumentResponseDto> {
@@ -119,7 +188,8 @@ export class DocumentsService {
       { relations: { caregiver: true } },
       'Documento não encontrado.',
     )
-    return paraResposta(doc, dataLocal())
+    const [comLink] = await this.comLinks([paraResposta(doc, dataLocal())])
+    return comLink
   }
 
   async create(caregiverId: string, dto: CreateDocumentDto): Promise<DocumentResponseDto> {
@@ -228,6 +298,12 @@ function paraResposta(d: CaregiverDocument, hoje: string): DocumentResponseDto {
     expiresAt: d.expiresAt ?? null,
     fileKey: d.fileKey ?? null,
     fileName: d.fileName ?? null,
+    mimeType: d.mimeType ?? null,
+    fileSize: d.fileSize ?? null,
+    fileUploadedAt: d.fileUploadedAt ?? null,
+    // Preenchido depois, por `comLinks`: assinar é assíncrono e este mapeamento
+    // precisa continuar sendo função pura, testável sem armazenamento nenhum.
+    fileUrl: null,
     notes: d.notes ?? null,
     status,
     daysToExpire,

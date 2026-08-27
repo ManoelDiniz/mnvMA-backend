@@ -82,9 +82,21 @@ export class CaregiverDocument extends TenantBaseEntity {
   @Column({ type: 'varchar', length: 400, nullable: true })
   fileKey?: string | null
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ description: 'Nome original, só para exibir e baixar' })
   @Column({ type: 'varchar', length: 200, nullable: true })
   fileName?: string | null
+
+  @ApiPropertyOptional()
+  @Column({ type: 'varchar', length: 120, nullable: true })
+  mimeType?: string | null
+
+  @ApiPropertyOptional({ description: 'Bytes' })
+  @Column({ type: 'int', nullable: true })
+  fileSize?: number | null
+
+  @ApiPropertyOptional()
+  @Column({ type: 'datetime', precision: 6, nullable: true })
+  fileUploadedAt?: Date | null
 
   @ApiPropertyOptional()
   @Column({ type: 'text', nullable: true })

@@ -112,8 +112,20 @@ export class DocumentResponseDto {
   @ApiPropertyOptional() number: string | null
   @ApiPropertyOptional() issuedAt: string | null
   @ApiPropertyOptional() expiresAt: string | null
-  @ApiPropertyOptional() fileKey: string | null
+  @ApiPropertyOptional({ description: 'Chave no armazenamento — uso interno' })
+  fileKey: string | null
   @ApiPropertyOptional() fileName: string | null
+  @ApiPropertyOptional() mimeType: string | null
+  @ApiPropertyOptional({ description: 'Bytes' }) fileSize: number | null
+  @ApiPropertyOptional() fileUploadedAt: Date | null
+
+  /**
+   * Link temporário para baixar. Some quando não há arquivo, e vence em poucos
+   * minutos — ele circula por e-mail e WhatsApp, e documento de cuidador traz
+   * CPF e foto.
+   */
+  @ApiPropertyOptional({ description: 'URL assinada, de vida curta' })
+  fileUrl: string | null
   @ApiPropertyOptional() notes: string | null
   @ApiProperty({ enum: DocumentStatus }) status: DocumentStatus
   @ApiPropertyOptional({ description: 'Dias até vencer. Negativo = vencido há N dias.' })

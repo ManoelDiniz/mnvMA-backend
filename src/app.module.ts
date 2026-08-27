@@ -7,6 +7,7 @@ import { TypeOrmModule } from '@nestjs/typeorm'
 import { LoggerModule } from 'nestjs-pino'
 import { SnakeNamingStrategy } from 'typeorm-naming-strategies'
 import { CommonModule } from './common/common.module'
+import { StorageModule } from './common/storage/storage.module'
 import { HttpExceptionFilter } from './common/filters/http-exception.filter'
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard'
 import { PermissionsGuard } from './common/guards/permissions.guard'
@@ -117,6 +118,7 @@ import { UsersModule } from './modules/users/users.module'
     ScheduleModule.forRoot(),
 
     MailModule,
+    StorageModule,
     BillingModule,
     AdminModule,
     JobsModule,
