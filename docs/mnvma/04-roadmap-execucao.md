@@ -157,7 +157,7 @@ credenciais de produção.
 | Impersonação | O suporte não consegue ver o que o cliente vê | Sprint 8 — desenho próprio |
 | Dashboard empresarial | A empresa não tem o panorama que o individual tem | Sprint 6 |
 | Rentabilidade por contrato | Falta o recorte no relatório | Sprint 6 |
-| Suíte de isolamento fora do CI | O teste existe e passa, mas nada bloqueia o merge | §6.1 |
+| Suíte de isolamento não bloqueia merge | Roda a cada PR desde 27/08, mas proteger a branch exige GitHub Pro | §6.1 |
 
 Esta tabela lista o que falta **no produto**. O que falta em volta dele — CI,
 observabilidade, LGPD, backup e as obrigações de cobrar no Brasil — está no
@@ -336,9 +336,31 @@ teste que existe, passa, e que ninguém é obrigado a rodar.
       método exercitado só no pior dia possível
 - [x] `npm audit` e Dependabot semanal nos dois repositórios, com major de
       framework ignorado (é decisão, não manutenção)
-- [ ] **Branch protegida exigindo o CI verde** ← é configuração no GitHub, não
-      arquivo no repositório: nada aqui dentro consegue ligá-la. Sem isto o
-      pipeline informa e o merge passa igual.
+- [ ] **Branch protegida exigindo o CI verde** ← **bloqueado pelo plano do
+      GitHub**, não por configuração que falta. Sem isto o pipeline informa e o
+      merge passa igual.
+
+      Tentado pela API, nos dois repositórios, com token de `Administration:
+      read and write`. As duas formas devolvem o mesmo 403:
+
+      ```
+      PUT  /repos/.../branches/main/protection  → 403
+      POST /repos/.../rulesets                  → 403
+      "Upgrade to GitHub Pro or make this repository public to enable
+       this feature."
+      ```
+
+      Proteção de branch — clássica ou ruleset — não existe em repositório
+      **privado** na conta gratuita. As saídas, em ordem de preço:
+
+      | Saída | Custo | O que muda |
+      |---|---|---|
+      | GitHub Pro | US$ 4/mês | liga os comandos abaixo, sem mais nada a fazer |
+      | Tornar público | zero | não: o schema, as regras de cobrança e a régua de dunning ficam abertos |
+      | Disciplina + hook local | zero | `pre-push` recusando `main` força o fluxo de PR, mas **não** sabe se o CI passou |
+
+      Até que uma delas aconteça, o vermelho do CI continua sendo informação, e
+      o §9 continua com o primeiro risco mitigado só por hábito.
 
       O comando abaixo exige os checks e **não** exige aprovação em PR — num
       projeto de uma pessoa só, exigir review trancaria o dono para fora do

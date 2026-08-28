@@ -1,0 +1,49 @@
+#!/bin/sh
+#
+# Recusa push direto na branch padrão.
+#
+# Não é proteção de branch: é o que dá para fazer sem ela. Proteção de verdade
+# mora no servidor, sabe se o CI passou e vale para qualquer clone — e no
+# GitHub, em repositório privado, exige plano pago (ver §6.1 do roadmap).
+# Este hook cobre a metade que é esquecimento, não a que é pressa: força o
+# fluxo branch → PR → CI verde → merge, sem saber nada sobre o resultado do CI.
+#
+# Instalado por `git config core.hooksPath .githooks` — cada clone precisa
+# rodar isso uma vez, porque o Git nunca liga hook sozinho (se ligasse,
+# clonar repositório alheio executaria código alheio).
+#
+# Escape: PUSH_DIRETO=1 git push origin main
+
+BRANCH_PROTEGIDA='refs/heads/main'
+
+while read -r _ref_local _sha_local ref_remoto _sha_remoto; do
+  [ "$ref_remoto" = "$BRANCH_PROTEGIDA" ] || continue
+
+  if [ "${PUSH_DIRETO:-}" = "1" ]; then
+    echo "pre-push: push direto na main, autorizado por PUSH_DIRETO=1." >&2
+    exit 0
+  fi
+
+  cat >&2 <<'MSG'
+
+  ✗ push direto na main recusado
+
+  O CI roda a cada PR — na main ele roda depois, quando já não adianta.
+
+    git switch -c minha-mudanca
+    git push -u origin minha-mudanca
+    gh pr create --fill
+
+  E, quando o CI fechar verde:
+
+    gh pr merge --squash --delete-branch
+
+  Se precisar mesmo empurrar direto (correção de produção às 3h da manhã):
+
+    PUSH_DIRETO=1 git push origin main
+
+MSG
+  exit 1
+done
+
+exit 0
