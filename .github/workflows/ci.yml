@@ -56,22 +56,24 @@ jobs:
         # A mesma versão do docker-compose. Banco de CI diferente do de
         # desenvolvimento esconde justamente o erro que só aparece num deles.
         image: mysql:8.4
+        # `root`, e não um usuário comum, porque as migrations criam TRIGGERs —
+        # que substituem o Row Level Security que o MySQL não tem. Com binlog
+        # ligado, criar trigger exige SUPER.
         env:
           MYSQL_ROOT_PASSWORD: masterkey
           MYSQL_DATABASE: cuidador_test
         ports:
           - 3306:3306
-        # `root`, e não um usuário comum, porque as migrations criam TRIGGERs —
-        # que substituem o Row Level Security que o MySQL não tem. Com binlog
-        # ligado, criar trigger exige SUPER.
+        # Só flags do `docker create` cabem aqui. Argumentos do servidor MySQL
+        # (`--character-set-server`, `--default-time-zone`) fazem o Docker
+        # recusar o container inteiro com "unknown flag" — service container do
+        # Actions não aceita `command`. O fuso vira um passo logo abaixo, e o
+        # charset já é o padrão do MySQL 8.
         options: >-
           --health-cmd="mysqladmin ping -h localhost -pmasterkey"
           --health-interval=5s
           --health-timeout=5s
           --health-retries=20
-          --character-set-server=utf8mb4
-          --collation-server=utf8mb4_0900_ai_ci
-          --default-time-zone=+00:00
 
     env:
       NODE_ENV: test
@@ -101,6 +103,27 @@ jobs:
           cache: npm
 
       - run: npm ci
+
+      # O que era `--default-time-zone=+00:00` no container. Plantão que vira o
+      # dia depende disso: um servidor em fuso local faria `CURRENT_TIMESTAMP`
+      # gravar hora errada e o teste de 19h→07h passar por acidente. Confere o
+      # charset na mesma ida, já que a garantia saiu do container.
+      - name: Servidor em UTC e utf8mb4
+        run: |
+          node -e "
+          const mysql = require('mysql2/promise');
+          mysql.createConnection({ host: '127.0.0.1', user: 'root', password: 'masterkey' })
+            .then(async (c) => {
+              await c.query(\"SET GLOBAL time_zone = '+00:00'\");
+              const [[row]] = await c.query(
+                \"SELECT @@global.time_zone tz, @@character_set_server cs, @@collation_server co\",
+              );
+              console.log(row);
+              if (row.cs !== 'utf8mb4') throw new Error('charset do servidor: ' + row.cs);
+              await c.end();
+            })
+            .catch((e) => { console.error(e.message); process.exit(1); });
+          "
 
       # Migration que não roda em banco limpo é migration que quebra no deploy.
       - name: Migrations em banco limpo
