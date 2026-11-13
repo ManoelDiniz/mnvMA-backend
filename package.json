@@ -107,5 +107,8 @@
     "moduleNameMapper": {
       "^src/(.*)$": "<rootDir>/$1"
     }
+  },
+  "overrides": {
+    "multer@^2.0.0": "^2.5.0"
   }
 }
